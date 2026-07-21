@@ -34,6 +34,9 @@ const SEED = {
   apiKey: '',
   theme: 'light',
   notes: [],               // {id,title,body,color,ts}
+  roadmaps: [],            // {id,title,icon,milestones:[{text,done,sub:[{text,done}]}]}
+  reminders: [],           // {id,text,when,repeat,fired,done}
+  remindSound: 'chime',
   focus: {sessions:0, minutes:0, streakDays:[], last:null},  // streakDays: ['2026-07-20',…]
   toolkit: {sems:[], att:{attended:'', held:'', target:75}}, // sems: [{sgpa,credits}]
 };
@@ -398,7 +401,7 @@ document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', (
 /* ---------- render dispatcher ---------- */
 const VIEWS = {};
 function render(){
-  const fabViews = ['links','resources','internships','videos','clipboard','instagram','notes','aitools','courses','academics','tasks','planner'];
+  const fabViews = ['links','resources','internships','videos','clipboard','instagram','notes','aitools','courses','roadmap','academics','tasks','reminders','planner'];
   $('fab').classList.toggle('hidden', !fabViews.includes(S.view));
   greet();
   ($('viewRoot').innerHTML = '');
@@ -431,6 +434,7 @@ VIEWS.dashboard = function(){
   const upcoming = [];
   S.tasks.filter(t => !t.done && t.due).forEach(t => upcoming.push({label:t.text, date:t.due, kind:'📌 Task', go:'tasks'}));
   S.companies.forEach(c => (c.dates||[]).forEach(d => { if(d.date) upcoming.push({label:c.name + ' — ' + d.label, date:d.date, kind:'💼', go:'internships'}); }));
+  S.reminders.filter(r => !r.done && r.when).forEach(r => upcoming.push({label:r.text, date:String(r.when).slice(0,10), kind:'🔔', go:'reminders'}));
   upcoming.sort((a,b) => a.date.localeCompare(b.date));
   const soon = upcoming.filter(u => { const n = daysUntil(u.date); return n !== null && n >= -3 && n <= 45; }).slice(0, 8);
 
@@ -1175,6 +1179,8 @@ function hubContext(){
   lines.push('COMPANIES: ' + (S.companies.map(c => `${c.name} — ${c.role||''} — status ${c.status}${(c.dates||[]).length ? ' — dates: ' + c.dates.map(d => d.label + ' ' + d.date).join(', ') : ''}`).join(' | ') || 'none'));
   lines.push('COURSES: ' + (S.courses.map(c => `${c.name} ${c.progress||0}%`).join('; ') || 'none'));
   lines.push('PLANS: ' + (S.plans.map(p => `${p.title} (${p.steps.filter(s=>s.done).length}/${p.steps.length} steps)`).join('; ') || 'none'));
+  lines.push('ROADMAPS: ' + (S.roadmaps.map(r => { const all = r.milestones.flatMap(m => m.sub.length ? m.sub : [m]); return `${r.title} ${all.filter(x=>x.done).length}/${all.length} topics`; }).join('; ') || 'none'));
+  lines.push('REMINDERS: ' + (S.reminders.filter(r => !r.done).map(r => `${r.text} at ${r.when}`).join('; ') || 'none'));
   lines.push('SAVED: ' + S.links.length + ' links, ' + S.resources.length + ' resources, ' + S.videos.length + ' videos, ' + S.clips.length + ' clipboard snippets, ' + S.igLinks.length + ' Instagram saves');
   return lines.join('\n');
 }
@@ -1519,6 +1525,8 @@ const PAL_CMDS = [
   {icon:'📝', label:'Go to Notes', run:() => setView('notes')},
   {icon:'🤖', label:'Go to AI Arsenal', run:() => setView('aitools')},
   {icon:'🎓', label:'Go to Courses', run:() => setView('courses')},
+  {icon:'🧭', label:'Go to Roadmaps', run:() => setView('roadmap')},
+  {icon:'🔔', label:'Go to Reminders', run:() => setView('reminders')},
   {icon:'🏛️', label:'Go to Academics', run:() => setView('academics')},
   {icon:'🧮', label:'Go to Toolkit', run:() => setView('toolkit')},
   {icon:'✅', label:'Go to Tasks', run:() => setView('tasks')},
@@ -1530,6 +1538,8 @@ const PAL_CMDS = [
   {icon:'➕', label:'Add company', run:() => { setView('internships'); addCompany(); }},
   {icon:'➕', label:'Add note', run:() => { setView('notes'); addNote(); }},
   {icon:'➕', label:'Add clipboard snippet', run:() => { setView('clipboard'); addClip(); }},
+  {icon:'➕', label:'Add reminder', run:() => { setView('reminders'); addReminder(); }},
+  {icon:'➕', label:'Create roadmap', run:() => { setView('roadmap'); addRoadmap(); }},
   {icon:'▶', label:'Start focus session', run:() => { setView('focus'); if(!FT.running) toggleFocus(); }},
   {icon:'🌙', label:'Toggle dark / light mode', run:() => $('themeBtn').click()},
   {icon:'⬇', label:'Backup data', run:() => $('exportBtn').click()},
@@ -1619,6 +1629,252 @@ $('shareSetupBtn').addEventListener('click', () => {
   });
 });
 
+/* ================= ROADMAPS ================= */
+VIEWS.roadmap = function(){
+  $('viewRoot').innerHTML = `
+  <div class="sec-head">
+    <div><div class="sec-title"><span class="em">🧭</span>Roadmaps</div><div class="sec-sub">Paste a syllabus → follow it like a journey. The pulsing dot is where you are now</div></div>
+  </div>
+  ${S.roadmaps.length ? `<div class="grid grid-2">${S.roadmaps.map(r => {
+    const all = r.milestones.flatMap(m => m.sub.length ? m.sub : [m]);
+    const doneN = all.filter(x => x.done).length;
+    const pct = all.length ? Math.round(doneN / all.length * 100) : 0;
+    const hereIdx = r.milestones.findIndex(m => !m.done);
+    return `<div class="card rm-card">
+      <div class="rm-head">
+        <div class="rm-ic">${esc(r.icon || '🧭')}</div>
+        <div style="flex:1;min-width:0">
+          <div class="rm-title">${esc(r.title)}</div>
+          <div class="rm-sub">${doneN}/${all.length} topics · ${pct === 100 ? 'completed 🏆' : pct + '% travelled'}</div>
+        </div>
+      </div>
+      <div class="rm-progress"><div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div><span class="rm-pct">${pct}%</span></div>
+      <div class="rm-path">${r.milestones.map((m, mi) => `
+        <div class="mile ${m.done ? 'done' : ''}">
+          <button class="mile-dot ${m.done ? 'on' : ''} ${mi === hereIdx ? 'here' : ''}" onclick="rmToggleMile('${r.id}',${mi})" title="${m.done ? 'Mark not done' : 'Mark milestone done'}">${m.done ? '✓' : ''}</button>
+          <span class="mile-text" onclick="rmToggleMile('${r.id}',${mi})">${esc(m.text)}${mi === hereIdx ? '<span class="here-tag">You are here</span>' : ''}</span>
+          ${m.sub.length ? `<div class="sub-topics">${m.sub.map((st, si) => `
+            <div class="sub-t ${st.done ? 'done' : ''}" onclick="rmToggleSub('${r.id}',${mi},${si})">
+              <span class="cb ${st.done ? 'on' : ''}">${st.done ? '✓' : ''}</span>${esc(st.text)}
+            </div>`).join('')}</div>` : ''}
+        </div>`).join('')}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-soft" style="padding:8px 14px;font-size:12px" onclick="addRoadmap('${r.id}')">✏️ Edit</button>
+        <button class="btn btn-soft btn-danger" style="padding:8px 14px;font-size:12px" onclick="delItem('roadmaps','${r.id}')">🗑</button>
+      </div>
+    </div>`; }).join('')}</div>`
+  : `<div class="empty"><div class="big">🧭</div><h3>No roadmaps yet</h3><p>Tap ＋ and paste any syllabus — units become milestones, topics become checkable steps. Perfect for DSA sheets, semester subjects, or a full placement-prep curriculum.</p></div>`}`;
+};
+function rmToggleMile(id, mi){
+  const r = S.roadmaps.find(x => x.id === id); if(!r) return;
+  const m = r.milestones[mi];
+  m.done = !m.done;
+  m.sub.forEach(s => s.done = m.done);   // milestone drives its sub-topics
+  save(); render();
+  const all = r.milestones.flatMap(x => x.sub.length ? x.sub : [x]);
+  if(all.length && all.every(x => x.done)){ confetti(); toast('🏆 Roadmap "' + r.title + '" completed!'); }
+}
+function rmToggleSub(id, mi, si){
+  const r = S.roadmaps.find(x => x.id === id); if(!r) return;
+  const m = r.milestones[mi];
+  m.sub[si].done = !m.sub[si].done;
+  m.done = m.sub.every(s => s.done);     // all sub-topics done → milestone done
+  save(); render();
+  const all = r.milestones.flatMap(x => x.sub.length ? x.sub : [x]);
+  if(all.length && all.every(x => x.done)){ confetti(); toast('🏆 Roadmap "' + r.title + '" completed!'); }
+}
+function addRoadmap(editId){
+  const e = editId ? S.roadmaps.find(x => x.id === editId) : null;
+  const toText = r => r.milestones.map(m => m.text + m.sub.map(s => '\n- ' + s.text).join('')).join('\n');
+  openModal(e ? 'Edit roadmap' : 'Create a roadmap',
+    field('Roadmap name', inp('f1', 'e.g. Operating Systems — Sem 5 / Striver DSA Sheet', 'text', e && e.title)) +
+    field('Emoji icon (optional)', inp('f2', '🧭', 'text', e && e.icon)) +
+    field('Syllabus — one milestone per line, sub-topics start with "-"',
+      `<textarea id="f3" style="min-height:170px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px" placeholder="Unit 1: Processes & Threads&#10;- Process states&#10;- Context switching&#10;Unit 2: Scheduling&#10;- FCFS, SJF, Round Robin&#10;Unit 3: Deadlocks">${esc(e ? toText(e) : '')}</textarea>`) +
+    saveBtn(e ? 'Save changes' : 'Create roadmap'), () => {
+    $('mSave').onclick = () => {
+      const title = $('f1').value.trim();
+      if(!title) return toast('Name the roadmap first');
+      const lines = $('f3').value.split('\n').map(l => l.replace(/\r/, '')).filter(l => l.trim());
+      if(!lines.length) return toast('Paste the syllabus lines');
+      const old = e ? e.milestones : [];
+      const findOld = (t, sub) => {
+        for(const m of old){
+          if(!sub && m.text === t) return m.done;
+          if(sub) for(const s of m.sub) if(s.text === t) return s.done;
+        }
+        return false;
+      };
+      const milestones = [];
+      lines.forEach(l => {
+        if(/^\s*[-•*]/.test(l)){
+          const t = l.replace(/^\s*[-•*]\s*/, '').trim();
+          if(!milestones.length) milestones.push({text: 'Topics', done: false, sub: []});
+          milestones[milestones.length - 1].sub.push({text: t, done: findOld(t, true)});
+        } else {
+          milestones.push({text: l.trim(), done: findOld(l.trim(), false), sub: []});
+        }
+      });
+      milestones.forEach(m => { if(m.sub.length) m.done = m.sub.every(s => s.done); });
+      if(e) Object.assign(e, {title, icon: $('f2').value.trim(), milestones});
+      else S.roadmaps.push({id: uid(), title, icon: $('f2').value.trim(), milestones});
+      save(); closeModal(); render(); toast(e ? 'Roadmap updated' : 'Roadmap created — start the journey 🧭');
+    };
+  });
+}
+
+/* ================= REMINDERS ================= */
+const SOUNDS = {
+  chime:  {label: '🎐 Chime',  notes: [[880, 0, .18], [1174.7, .12, .22], [1568, .26, .38]]},
+  bell:   {label: '🔔 Bell',   notes: [[1318.5, 0, .5], [659.3, .02, .6]]},
+  bubble: {label: '🫧 Bubble', notes: [[392, 0, .09], [523.3, .09, .09], [659.3, .18, .12], [784, .27, .2]]},
+  alarm:  {label: '⏰ Alert',  notes: [[988, 0, .12], [988, .18, .12], [1319, .36, .3]]},
+};
+function playSound(name){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = playSound._ctx = playSound._ctx || new AC();
+    if(ctx.state === 'suspended') ctx.resume();
+    const t0 = ctx.currentTime + .02;
+    (SOUNDS[name] || SOUNDS.chime).notes.forEach(([freq, at, dur]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0, t0 + at);
+      g.gain.linearRampToValueAtTime(.22, t0 + at + .015);
+      g.gain.exponentialRampToValueAtTime(.001, t0 + at + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t0 + at); o.stop(t0 + at + dur + .05);
+      // soft bell overtone
+      const o2 = ctx.createOscillator(), g2 = ctx.createGain();
+      o2.type = 'sine'; o2.frequency.value = freq * 2;
+      g2.gain.setValueAtTime(0, t0 + at);
+      g2.gain.linearRampToValueAtTime(.06, t0 + at + .015);
+      g2.gain.exponentialRampToValueAtTime(.001, t0 + at + dur * .7);
+      o2.connect(g2); g2.connect(ctx.destination);
+      o2.start(t0 + at); o2.stop(t0 + at + dur + .05);
+    });
+  }catch(e){}
+}
+function fmtWhen(w){
+  const d = new Date(w);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const that = new Date(d); that.setHours(0,0,0,0);
+  const dd = Math.round((that - today) / 86400000);
+  const time = d.toLocaleTimeString('en-IN', {hour: 'numeric', minute: '2-digit'});
+  if(dd === 0) return 'Today · ' + time;
+  if(dd === 1) return 'Tomorrow · ' + time;
+  if(dd === -1) return 'Yesterday · ' + time;
+  return d.toLocaleDateString('en-IN', {day: 'numeric', month: 'short'}) + ' · ' + time;
+}
+VIEWS.reminders = function(){
+  const items = [...S.reminders].sort((a,b) => (a.done?1:0)-(b.done?1:0) || String(a.when).localeCompare(String(b.when)));
+  $('viewRoot').innerHTML = `
+  <div class="sec-head">
+    <div><div class="sec-title"><span class="em">🔔</span>Reminders</div><div class="sec-sub">Pop up right inside the app — with sound ${('Notification' in window && Notification.permission==='granted') ? '· system notifications ON' : ''}</div></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="sndSel" class="chip" style="padding:7px 12px;cursor:pointer">
+        ${Object.entries(SOUNDS).map(([k, v]) => `<option value="${k}" ${S.remindSound === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+      </select>
+      <button class="btn btn-soft" onclick="playSound(S.remindSound)" title="Preview sound">▶ Test</button>
+    </div>
+  </div>
+  ${items.length ? `<div style="display:flex;flex-direction:column;gap:9px">${items.map(r => {
+    const past = !r.done && new Date(r.when) <= new Date();
+    return `<div class="rem-row ${past ? 'past' : ''} ${r.done ? 'done' : ''}">
+      <div class="rem-ic">${r.done ? '✅' : past ? '⏰' : '🔔'}</div>
+      <div class="rem-main">
+        <div class="rem-text">${esc(r.text)}</div>
+        <div class="rem-when">${fmtWhen(r.when)} ${r.repeat !== 'once' ? `<span class="rem-repeat">${r.repeat}</span>` : ''}</div>
+      </div>
+      ${r.done
+        ? `<button class="icon-btn" onclick="remRestore('${r.id}')" title="Re-arm">↺</button>`
+        : `<button class="icon-btn" onclick="remDone('${r.id}')" title="Mark done">✓</button>`}
+      <button class="icon-btn" onclick="addReminder('${r.id}')" title="Edit">✏️</button>
+      <button class="icon-btn danger" onclick="delItem('reminders','${r.id}')" title="Delete">🗑</button>
+    </div>`; }).join('')}</div>`
+  : `<div class="empty"><div class="big">🔔</div><h3>No reminders set</h3><p>Tap ＋ — "DBMS quiz at 5pm", "Apply to Google before Friday". They pop up inside the app with a sound, even while you're in another section.</p></div>`}`;
+  const sel = $('sndSel');
+  if(sel) sel.onchange = () => { S.remindSound = sel.value; save(); playSound(sel.value); };
+};
+function remDone(id){ const r = S.reminders.find(x => x.id === id); if(r){ r.done = true; save(); render(); } }
+function remRestore(id){ const r = S.reminders.find(x => x.id === id); if(r){ r.done = false; r.fired = false; save(); render(); } }
+function addReminder(editId){
+  const e = editId ? S.reminders.find(x => x.id === editId) : null;
+  const defWhen = e ? e.when : (() => { const d = new Date(Date.now() + 3600000); d.setSeconds(0,0);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + 'T' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); })();
+  openModal(e ? 'Edit reminder' : 'New reminder',
+    field('Remind me to…', inp('f1', 'e.g. Submit DBMS assignment', 'text', e && e.text)) +
+    field('When', `<input id="f2" type="datetime-local" value="${esc(defWhen)}">`) +
+    field('Repeat', sel('f3', ['once', 'daily', 'weekly'], e ? e.repeat : 'once')) +
+    saveBtn(e ? 'Save' : 'Set reminder ⏰'), () => {
+    $('mSave').onclick = () => {
+      const text = $('f1').value.trim(), when = $('f2').value;
+      if(!text || !when) return toast('Text and time are required');
+      if(e) Object.assign(e, {text, when, repeat: $('f3').value, fired: new Date(when) <= new Date() ? e.fired : false});
+      else S.reminders.push({id: uid(), text, when, repeat: $('f3').value, fired: false, done: false});
+      save(); closeModal(); render(); toast(e ? 'Updated' : '⏰ Reminder set — I\'ll ping you');
+      if('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    };
+  });
+}
+/* --- the ticker: checks every 20s, pops + sounds due reminders --- */
+function notifPop(title, msg, remId){
+  const stack = $('notifStack');
+  const el = document.createElement('div');
+  el.className = 'notif';
+  el.innerHTML = `
+    <div class="notif-bell">🔔</div>
+    <div class="notif-body">
+      <div class="notif-title">${esc(title)}</div>
+      <div class="notif-msg">${esc(msg)}</div>
+      <div class="notif-acts">
+        ${remId ? `<button class="btn btn-primary" data-a="done">✓ Done</button>
+        <button class="btn btn-soft" data-a="snooze">💤 10 min</button>` : ''}
+        <button class="btn btn-soft" data-a="close">Dismiss</button>
+      </div>
+    </div>`;
+  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 320); };
+  el.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+    const a = b.dataset.a;
+    const r = remId && S.reminders.find(x => x.id === remId);
+    if(a === 'done' && r){ r.done = true; save(); if(S.view === 'reminders') render(); }
+    if(a === 'snooze' && r){
+      const d = new Date(Date.now() + 600000);
+      r.when = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + 'T' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      r.fired = false; save(); if(S.view === 'reminders') render(); toast('Snoozed 10 minutes 💤');
+    }
+    close();
+  });
+  stack.appendChild(el);
+  setTimeout(() => { if(el.parentElement) close(); }, 30000);
+}
+function bumpRepeat(r){
+  const d = new Date(r.when);
+  if(r.repeat === 'daily') d.setDate(d.getDate() + 1);
+  else if(r.repeat === 'weekly') d.setDate(d.getDate() + 7);
+  else return;
+  while(d <= new Date()){ d.setDate(d.getDate() + (r.repeat === 'daily' ? 1 : 7)); }
+  r.when = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + 'T' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  r.fired = false;
+}
+function checkReminders(){
+  const now = new Date();
+  let hit = false;
+  S.reminders.forEach(r => {
+    if(r.done || r.fired) return;
+    if(new Date(r.when) <= now){
+      r.fired = true; hit = true;
+      notifPop('Reminder', r.text, r.id);
+      playSound(S.remindSound);
+      try{ if(Notification.permission === 'granted') new Notification('⬢ Master Hub', {body: r.text, icon: 'icon-192.png'}); }catch(e){}
+      if(r.repeat !== 'once') bumpRepeat(r);
+    }
+  });
+  if(hit) save();
+}
+setInterval(checkReminders, 20000);
+setTimeout(checkReminders, 2500);
+
 /* ================= GLOBAL SEARCH ================= */
 function searchAll(term){
   const t = term.toLowerCase();
@@ -1636,6 +1892,8 @@ function searchAll(term){
   S.tasks.forEach(x => test(x.text + ' ' + (x.tag||'')) && hits.push({kind:'📌', title:x.text, go:'tasks'}));
   S.plans.forEach(p => test(p.title) && hits.push({kind:'🗺️', title:p.title, go:'planner'}));
   S.notes.forEach(n => test((n.title||'') + ' ' + n.body) && hits.push({kind:'📝', title:n.title || n.body.slice(0,40), go:'notes'}));
+  S.roadmaps.forEach(r => test(r.title + ' ' + r.milestones.map(m => m.text + ' ' + m.sub.map(s => s.text).join(' ')).join(' ')) && hits.push({kind:'🧭', title:r.title, go:'roadmap'}));
+  S.reminders.forEach(r => test(r.text) && hits.push({kind:'🔔', title:r.text, go:'reminders'}));
   return hits;
 }
 $('globalSearch').addEventListener('input', function(){
@@ -1676,7 +1934,7 @@ function delItem(coll, id){
 }
 $('fab').addEventListener('click', () => {
   ({links:addLink, resources:addResource, internships:addCompany, videos:addVideo,
-    clipboard:addClip, instagram:addIgLink, notes:addNote,
+    clipboard:addClip, instagram:addIgLink, notes:addNote, roadmap:addRoadmap, reminders:addReminder,
     aitools:addAiTool, courses:addCourse, academics:addAcademic, tasks:addTask, planner:addPlan}[S.view] || (()=>{}))();
 });
 $('modalClose').addEventListener('click', closeModal);

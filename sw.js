@@ -1,4 +1,4 @@
-const CACHE = 'masterhub-v7';
+const CACHE = 'masterhub-v8';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json', './icon.svg',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
