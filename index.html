@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#eaf1fa">
+<title>Master Hub — Your Personal Command Center</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- CONNECTION BANNER -->
+<div class="conn-bar" id="connBar" hidden></div>
+
+<!-- ANIMATED BACKGROUND -->
+<div class="bg-orbs"><div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div></div>
+
+<!-- CURSOR FX -->
+<div class="cursor-dot" id="curDot"></div>
+<div class="cursor-ring" id="curRing"></div>
+
+<!-- SIDEBAR (desktop) / BOTTOM NAV (mobile) -->
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <div class="brand-logo">⬢</div>
+    <div class="brand-text"><h1>Master Hub</h1><span>command center</span></div>
+  </div>
+  <nav class="nav" id="nav">
+    <button class="nav-btn active" data-view="dashboard"><span class="ni">🏠</span><span class="nt">Dashboard</span></button>
+    <button class="nav-btn" data-view="links"><span class="ni">🔗</span><span class="nt">Quick Links</span></button>
+    <button class="nav-btn" data-view="resources"><span class="ni">📚</span><span class="nt">Resources & PDFs</span></button>
+    <button class="nav-btn" data-view="internships"><span class="ni">💼</span><span class="nt">Internships</span></button>
+    <button class="nav-btn" data-view="videos"><span class="ni">▶️</span><span class="nt">YouTube Vault</span></button>
+    <button class="nav-btn" data-view="clipboard"><span class="ni">📋</span><span class="nt">Clipboard</span></button>
+    <button class="nav-btn" data-view="instagram"><span class="ni">📸</span><span class="nt">Instagram</span></button>
+    <button class="nav-btn" data-view="notes"><span class="ni">📝</span><span class="nt">Notes</span></button>
+    <button class="nav-btn" data-view="aitools"><span class="ni">🤖</span><span class="nt">AI Arsenal</span></button>
+    <button class="nav-btn" data-view="courses"><span class="ni">🎓</span><span class="nt">Courses</span></button>
+    <button class="nav-btn" data-view="academics"><span class="ni">🏛️</span><span class="nt">Academics</span></button>
+    <button class="nav-btn" data-view="toolkit"><span class="ni">🧮</span><span class="nt">Toolkit</span></button>
+    <button class="nav-btn" data-view="tasks"><span class="ni">✅</span><span class="nt">Tasks</span></button>
+    <button class="nav-btn" data-view="focus"><span class="ni">⏱️</span><span class="nt">Focus</span></button>
+    <button class="nav-btn" data-view="planner"><span class="ni">🗺️</span><span class="nt">Planner</span></button>
+    <button class="nav-btn" data-view="assistant"><span class="ni">✨</span><span class="nt">Assistant</span></button>
+  </nav>
+  <div class="sidebar-foot">
+    <button class="ghost-btn" id="exportBtn" title="Backup all data to a file">⬇ Backup</button>
+    <button class="ghost-btn" id="importBtn" title="Restore from backup">⬆ Restore</button>
+    <button class="ghost-btn" id="shareSetupBtn" title="Save links from anywhere">⚡</button>
+    <input type="file" id="importFile" accept=".json" hidden>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <header class="topbar">
+    <div class="greet" id="greet"></div>
+    <div class="top-actions">
+      <div class="search-wrap">
+        <input id="globalSearch" class="search" type="search" placeholder="Search everything…  ( / )">
+      </div>
+      <button class="theme-btn" id="themeBtn" title="Toggle light / dark">🌙</button>
+      <button class="theme-btn" id="phoneBtn" title="Open on your phone (QR)">📱</button>
+      <span id="syncDot" style="font-size:11px" title="sync status">●</span>
+    </div>
+  </header>
+  <div id="viewRoot" class="view-root"></div>
+</main>
+
+<!-- FLOATING ADD BUTTON -->
+<button class="fab" id="fab" title="Add to current section">＋</button>
+
+<!-- MODAL -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal" id="modal">
+    <div class="modal-head"><h2 id="modalTitle">Add</h2><button class="x" id="modalClose">✕</button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- COMMAND PALETTE -->
+<div class="pal-backdrop" id="palBackdrop">
+  <div class="pal">
+    <input id="palInput" class="pal-input" type="text" placeholder="Type a command or search…  (Ctrl+K)" autocomplete="off">
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-hint">↑↓ navigate · Enter select · Esc close</div>
+  </div>
+</div>
+
+<!-- FLOATING FOCUS PILL -->
+<button class="focus-pill" id="focusPill" hidden>⏱️ <span id="pillTime">25:00</span></button>
+
+<!-- CONFETTI -->
+<canvas id="confettiCanvas"></canvas>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
