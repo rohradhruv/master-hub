@@ -1,5 +1,7 @@
 # ⬢ Master Hub — Your Personal Command Center
 
+**🌍 Live app: https://rohradhruv.github.io/master-hub/** — installs as a real app on phone & PC, syncs through a private cloud database from anywhere. Open it via your desktop **Master Hub** icon (it carries your private database code), and pair new devices with the in-app 📱 button.
+
 One app for everything a BTech student needs to keep at their fingertips:
 
 | Section | What it does |
