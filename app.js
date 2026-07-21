@@ -64,9 +64,14 @@ let CLOUD_ID = localStorage.getItem('mh_cloud') || '';
     history.replaceState(null, '', location.pathname);
   }
 })();
+let cloudCoolOff = 0;   // when the service says "too many requests", back off politely
+function cloudGuard(r){
+  if(r.status === 429){ cloudCoolOff = Date.now() + 90000; throw new Error(429); }
+  return r;
+}
 async function cloudCreate(){
   const st = Object.assign({}, S); delete st.apiKey;   // API key never leaves this device
-  const res = await fetch(CLOUD_BASE, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(st)});
+  const res = cloudGuard(await fetch(CLOUD_BASE, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(st)}));
   const loc = res.headers.get('Location') || '';
   const id = loc.split('/').pop();
   if(!id) throw new Error('no id');
@@ -75,14 +80,17 @@ async function cloudCreate(){
   return id;
 }
 async function cloudPush(){
-  if(!CLOUD_ID) return;
+  if(!CLOUD_ID || Date.now() < cloudCoolOff) return;
   const st = Object.assign({}, S); delete st.apiKey;
-  const r = await fetch(CLOUD_BASE + '/' + CLOUD_ID, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(st)});
+  const r = cloudGuard(await fetch(CLOUD_BASE + '/' + CLOUD_ID, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(st)}));
   if(!r.ok) throw new Error(r.status);
 }
-async function cloudPull(){
-  if(!CLOUD_ID) return null;
-  const r = await fetch(CLOUD_BASE + '/' + CLOUD_ID, {cache:'no-store'});
+let lastCloudPullAt = 0;
+async function cloudPull(force){
+  if(!CLOUD_ID || Date.now() < cloudCoolOff) return null;
+  if(!force && Date.now() - lastCloudPullAt < 25000) return null;   // be gentle with the free service
+  lastCloudPullAt = Date.now();
+  const r = cloudGuard(await fetch(CLOUD_BASE + '/' + CLOUD_ID, {cache:'no-store'}));
   if(!r.ok) throw new Error(r.status);
   return r.json();
 }
@@ -125,12 +133,13 @@ async function pullState(initial){
       // local server + cloud both on: take whichever is newest so PC & phone meet
       if(CLOUD_ID){
         try{
-          const c = await cloudPull();
+          const c = await cloudPull(initial);
           if(c && (c.rev||0) > (remote && remote.rev || 0)) remote = c;
         }catch(e){}
       }
     } else {
-      remote = await cloudPull();
+      remote = await cloudPull(initial);
+      if(remote === null && !initial){ return; }   // gated tick — nothing to do
     }
     setSyncDot(true);
     if(!remote || !Object.keys(remote).length){
