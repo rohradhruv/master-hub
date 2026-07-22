@@ -47,6 +47,33 @@ function load(){
   return JSON.parse(JSON.stringify(SEED));
 }
 
+/* ---------- data-loss protection ----------
+   Count real user content, and keep rolling local snapshots. These live in
+   localStorage so they survive even if the cloud is wiped. Nothing can silently
+   overwrite good data with empty data. */
+function contentCount(o){
+  if(!o) return 0;
+  let n = 0;
+  ['links','resources','companies','videos','clips','igLinks','notes','tasks',
+   'plans','roadmaps','reminders','academics','courses'].forEach(k => { if(Array.isArray(o[k])) n += o[k].length; });
+  return n;
+}
+function snapshot(reason){
+  try{
+    if(contentCount(S) === 0) return;                 // never snapshot an empty state
+    const key = 'mh_bak_' + Date.now();
+    localStorage.setItem(key, JSON.stringify({at: Date.now(), reason, count: contentCount(S), data: S}));
+    // keep only the 8 most recent backups
+    const baks = Object.keys(localStorage).filter(k => k.startsWith('mh_bak_')).sort();
+    while(baks.length > 8){ localStorage.removeItem(baks.shift()); }
+  }catch(e){}
+}
+function listBackups(){
+  return Object.keys(localStorage).filter(k => k.startsWith('mh_bak_')).sort().reverse().map(k => {
+    try{ const b = JSON.parse(localStorage.getItem(k)); return {key:k, at:b.at, count:b.count, reason:b.reason}; }catch(e){ return null; }
+  }).filter(Boolean);
+}
+
 /* ---------- single shared database ----------
    Two backends, used automatically:
    • LOCAL  — the Python server's /api/state (when the app is opened from your PC's server)
@@ -146,27 +173,38 @@ async function pullState(initial){
     }
     setSyncDot(true);
     if(!remote || !Object.keys(remote).length){
-      if(initial) pushState();               // fresh server: seed it with this device's data
+      if(contentCount(S) > 0) pushState();   // remote empty but we have data → push ours up
       return;
     }
-    if((remote.rev||0) > (S.rev||0)){
-      const dirty = lastPushed !== '' && lastPushed !== JSON.stringify(S);
-      if(dirty){
-        // we have unsent local changes → merge (nothing gets lost), then push the union
-        S = mergeRemote(remote);
+    const localN = contentCount(S), remoteN = contentCount(remote);
+    const sameData = JSON.stringify(remote) === lastPushed || JSON.stringify(withoutMeta(remote)) === JSON.stringify(withoutMeta(S));
+    if(sameData){ return; }                  // identical → nothing to do
+
+    // SAFETY: a remote with LESS content never wipes local. Instead we merge
+    // (union) so both sides survive, then push the richer union back up.
+    if(remoteN < localN){
+      const merged = mergeRemote(remote);
+      if(contentCount(merged) >= localN){    // only accept a merge that keeps everything
+        S = merged;
         localStorage.setItem(LS_KEY, JSON.stringify(S));
-        pushState();
-      } else {
-        const keep = initial ? {apiKey: S.apiKey} : {view: S.view, theme: S.theme, apiKey: S.apiKey};
-        S = Object.assign({}, SEED, remote, keep);
-        localStorage.setItem(LS_KEY, JSON.stringify(S));
-        lastPushed = JSON.stringify(S);
+        pushState(); applyTheme(); render();
       }
-      applyTheme(); render();
-    } else if(initial && (S.rev||0) > (remote.rev||0)){
-      pushState();                           // this device is ahead → update the database
+      return;
     }
+    // remote has equal/more content → union-merge so local-only items are kept too
+    const before = localN;
+    S = mergeRemote(remote);
+    localStorage.setItem(LS_KEY, JSON.stringify(S));
+    if(contentCount(S) > remoteN) pushState();   // we added local-only items → push union
+    else lastPushed = JSON.stringify(S);
+    applyTheme(); render();
+    if(contentCount(S) < before) snapshot('after-merge-guard');
   }catch(e){ setSyncDot(false); }
+}
+function withoutMeta(o){
+  const c = Object.assign({}, o);
+  delete c.rev; delete c.view; delete c.theme; delete c.apiKey;
+  return c;
 }
 /* union-merge: remote + local, local wins on the same id; nothing silently lost */
 function mergeRemote(remote){
@@ -208,6 +246,7 @@ function setSyncDot(ok){
 }
 setInterval(() => { if(!document.hidden){ pullState(false); pushState(); } }, 5000);
 window.addEventListener('focus', () => pullState(false));
+setInterval(() => snapshot('auto'), 120000);   // rolling local backup every 2 min
 document.addEventListener('click', e => {
   if(e.target.closest('#connBar')) connHelp();
 });
@@ -1948,16 +1987,47 @@ $('exportBtn').addEventListener('click', () => {
   a.download = 'master-hub-backup-' + new Date().toISOString().slice(0,10) + '.json';
   a.click(); toast('Backup downloaded ✦ (uploaded PDFs stay on this device)');
 });
-$('importBtn').addEventListener('click', () => $('importFile').click());
+$('importBtn').addEventListener('click', () => openRestore());
 $('importFile').addEventListener('change', function(){
   const f = this.files[0]; if(!f) return;
   const r = new FileReader();
   r.onload = () => {
-    try{ S = Object.assign({}, SEED, JSON.parse(r.result)); save(); render(); toast('Hub restored ✦'); }
+    try{
+      snapshot('before-file-restore');
+      const inc = JSON.parse(r.result);
+      S = mergeRemote(inc);                    // merge, so a restore never deletes newer local items
+      save(); render(); toast('Restored & merged ✦ (' + contentCount(S) + ' items)');
+    }
     catch(e){ toast('Invalid backup file'); }
   };
   r.readAsText(f);
 });
+/* auto-backup restore panel — the safety net for exactly this situation */
+function openRestore(){
+  const baks = listBackups();
+  openModal('♻️ Restore your data',
+    `<p style="font-size:12.5px;color:var(--muted);line-height:1.6">The app keeps automatic local snapshots on this device. Pick one to bring it back, or load a backup file you downloaded earlier.</p>
+    ${baks.length ? `<div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">${baks.map(b =>
+      `<button class="btn btn-soft" style="justify-content:space-between;width:100%" onclick="restoreBak('${b.key}')">
+        <span>💾 ${new Date(b.at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+        <span style="color:var(--acc1);font-weight:700">${b.count} items</span>
+      </button>`).join('')}</div>`
+    : `<p style="font-size:12.5px;color:var(--faint);margin-top:4px">No auto-snapshots yet on this device.</p>`}
+    <div style="border-top:1px solid var(--border);margin:6px 0"></div>
+    <button class="btn btn-soft" onclick="$('importFile').click()">📁 Load a backup file (.json)</button>`);
+}
+function restoreBak(key){
+  try{
+    const b = JSON.parse(localStorage.getItem(key));
+    snapshot('before-restore');
+    S = mergeRemote(b.data);
+    save(); closeModal(); render();
+    toast('Restored ' + contentCount(S) + ' items ✦');
+  }catch(e){ toast('Could not read that snapshot'); }
+}
+
+/* snapshot on every load, so today's data is always recoverable */
+snapshot('on-load');
 
 /* first-run name ask */
 if(!S.name && !localStorage.getItem('mh_named')){
