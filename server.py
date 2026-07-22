@@ -10,6 +10,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 ROOT  = os.path.dirname(os.path.abspath(__file__))
 DATA  = os.path.join(ROOT, 'data')
 FILES = os.path.join(DATA, 'files')
+BACKUPS = os.path.join(DATA, 'backups')
 STATE = os.path.join(DATA, 'state.json')
 PORT  = int(sys.argv[1]) if len(sys.argv) > 1 else 8787
 os.makedirs(FILES, exist_ok=True)
@@ -45,6 +46,27 @@ class Handler(SimpleHTTPRequestHandler):
     def _file_path(self):
         fid = os.path.basename(self.path.split('?')[0])
         return (os.path.join(FILES, fid), fid) if SAFE_ID.match(fid) else (None, None)
+
+    def _backup(self, body):
+        """Keep a rolling history of non-trivial saves so data is never lost."""
+        try:
+            import time
+            data = json.loads(body)
+            n = sum(len(data.get(k, [])) for k in (
+                'links','resources','companies','videos','clips','igLinks','notes',
+                'tasks','plans','roadmaps','reminders','academics','courses')
+                if isinstance(data.get(k), list))
+            if n == 0:
+                return                       # never snapshot an empty state
+            os.makedirs(BACKUPS, exist_ok=True)
+            stamp = time.strftime('%Y%m%d-%H%M%S')
+            with open(os.path.join(BACKUPS, f'state-{stamp}-{n}items.json'), 'wb') as f:
+                f.write(body)
+            keep = sorted(os.listdir(BACKUPS))
+            while len(keep) > 40:            # keep the last 40 snapshots
+                os.remove(os.path.join(BACKUPS, keep.pop(0)))
+        except Exception:
+            pass
 
     def do_GET(self):
         path = self.path.split('?')[0]
@@ -106,6 +128,7 @@ class Handler(SimpleHTTPRequestHandler):
             with open(tmp, 'wb') as f:
                 f.write(body)
             os.replace(tmp, STATE)        # atomic write, no corruption
+            self._backup(body)            # keep a rolling history so data is never lost
             self._json({'ok': True})
             return
         if path.startswith('/api/file/'):
